@@ -1,0 +1,419 @@
+// HRIS data model. Status-like fields are plain strings; the allowed values
+// live in lib/constants.ts so the data exports cleanly to any other tool.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+// ---------------------------------------------------------------- Core
+
+model Office {
+  id              String   @id @default(cuid())
+  name            String
+  city            String
+  country         String
+  currency        String
+  timezone        String
+  weekendDays     String   // comma-separated JS weekday numbers, 0=Sun ... 6=Sat. "5,6" = Fri-Sat
+  annualLeaveDays Int
+  remoteDays      Int
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  holidays  OfficeHoliday[]
+  employees Employee[]
+  roles     Role[]
+}
+
+model OfficeHoliday {
+  id        String   @id @default(cuid())
+  officeId  String
+  date      DateTime
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  office Office @relation(fields: [officeId], references: [id], onDelete: Cascade)
+
+  @@unique([officeId, date])
+}
+
+model Team {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  leadId    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lead    Employee?  @relation("TeamLead", fields: [leadId], references: [id])
+  members Employee[] @relation("TeamMembers")
+  roles   Role[]
+}
+
+model Employee {
+  id                    String    @id @default(cuid())
+  firstName             String
+  lastName              String
+  workEmail             String    @unique
+  personalEmail         String?
+  phone                 String?
+  address               String?
+  emergencyContactName  String?
+  emergencyContactPhone String?
+  title                 String
+  teamId                String
+  managerId             String?
+  officeId              String
+  startDate             DateTime
+  endDate               DateTime?
+  probationEndDate      DateTime?
+  employmentType        String    // full_time | part_time | contractor
+  status                String    // probation | active | notice | left
+  appRole               String    // admin | manager | employee
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  team    Team       @relation("TeamMembers", fields: [teamId], references: [id])
+  manager Employee?  @relation("Reports", fields: [managerId], references: [id])
+  reports Employee[] @relation("Reports")
+  office  Office     @relation(fields: [officeId], references: [id])
+
+  leadsTeams          Team[]          @relation("TeamLead")
+  leaveBalances       LeaveBalance[]
+  leaveRequests       LeaveRequest[]  @relation("LeaveRequester")
+  leaveDecisions      LeaveRequest[]  @relation("LeaveApprover")
+  contracts           Contract[]
+  hiringRoles         Role[]          @relation("HiringManager")
+  interviews          Interview[]     @relation("Interviewer")
+  checklists          Checklist[]
+  checklistItemsOwned ChecklistItem[] @relation("ChecklistItemOwner")
+  goals               Goal[]
+  oneOnOnesAsEmployee OneOnOne[]      @relation("OneOnOneEmployee")
+  oneOnOnesAsManager  OneOnOne[]      @relation("OneOnOneManager")
+  actionItemsOwned    ActionItem[]    @relation("ActionItemOwner")
+  reviewsAbout        Review[]        @relation("ReviewSubject")
+  reviewsWritten      Review[]        @relation("ReviewAuthor")
+  salaryRecords       SalaryRecord[]  @relation("SalaryEmployee")
+  salaryRecordsMade   SalaryRecord[]  @relation("SalaryCreatedBy")
+  benefits            Benefit[]
+  advances            SalaryAdvance[]
+}
+
+// ---------------------------------------------------------------- HR operations
+
+model LeaveBalance {
+  id            String   @id @default(cuid())
+  employeeId    String
+  year          Int
+  type          String   // annual | remote
+  allowanceDays Float
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, year, type])
+}
+
+model LeaveRequest {
+  id           String    @id @default(cuid())
+  employeeId   String
+  type         String    // annual | remote | unpaid
+  startDate    DateTime
+  endDate      DateTime
+  workingDays  Float
+  reason       String?
+  status       String    // pending | approved | rejected | cancelled
+  approverId   String?
+  decidedAt    DateTime?
+  decisionNote String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  employee Employee  @relation("LeaveRequester", fields: [employeeId], references: [id], onDelete: Cascade)
+  approver Employee? @relation("LeaveApprover", fields: [approverId], references: [id])
+}
+
+model Contract {
+  id                 String    @id @default(cuid())
+  employeeId         String
+  title              String
+  type               String    // permanent | fixed_term | contractor
+  startDate          DateTime
+  endDate            DateTime?
+  status             String    // draft | signed_by_employee | countersigned | filed
+  signedByEmployeeAt DateTime?
+  countersignedAt    DateTime?
+  filedAt            DateTime?
+  fileRef            String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------------- Recruitment and onboarding
+
+model Role {
+  id              String    @id @default(cuid())
+  title           String
+  teamId          String
+  officeId        String
+  hiringManagerId String
+  status          String    // open | on_hold | filled | closed
+  openedAt        DateTime
+  closedAt        DateTime?
+  description     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  team          Team        @relation(fields: [teamId], references: [id])
+  office        Office      @relation(fields: [officeId], references: [id])
+  hiringManager Employee    @relation("HiringManager", fields: [hiringManagerId], references: [id])
+  candidates    Candidate[]
+}
+
+model Candidate {
+  id             String    @id @default(cuid())
+  roleId         String
+  name           String
+  email          String
+  phone          String?
+  source         String?
+  stage          String    // applied | screening | interview | offer | hired | rejected
+  stageChangedAt DateTime
+  appliedAt      DateTime
+  decision       String?   // hire | no_hire
+  decidedAt      DateTime?
+  outcomeSentAt  DateTime?
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  role       Role        @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  interviews Interview[]
+}
+
+model Interview {
+  id            String   @id @default(cuid())
+  candidateId   String
+  interviewerId String
+  scheduledAt   DateTime
+  kind          String   // screening | technical | system_design | culture | founder
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  candidate   Candidate  @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  interviewer Employee   @relation("Interviewer", fields: [interviewerId], references: [id])
+  scorecard   Scorecard?
+}
+
+model ScorecardCriterion {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  weight    Int      // all weights sum to 100
+  sortOrder Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  scores ScorecardScore[]
+}
+
+model Scorecard {
+  id             String    @id @default(cuid())
+  interviewId    String    @unique
+  recommendation String    // strong_yes | yes | no | strong_no
+  summary        String?
+  submittedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  interview Interview        @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  scores    ScorecardScore[]
+}
+
+model ScorecardScore {
+  id          String   @id @default(cuid())
+  scorecardId String
+  criterionId String
+  weight      Int      // copied from the criterion at submit time
+  score       Int      // 1-5
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  scorecard Scorecard          @relation(fields: [scorecardId], references: [id], onDelete: Cascade)
+  criterion ScorecardCriterion @relation(fields: [criterionId], references: [id])
+
+  @@unique([scorecardId, criterionId])
+}
+
+model Checklist {
+  id         String   @id @default(cuid())
+  employeeId String
+  kind       String   // onboarding | offboarding
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  employee Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  items    ChecklistItem[]
+}
+
+model ChecklistItem {
+  id          String    @id @default(cuid())
+  checklistId String
+  title       String
+  ownerId     String
+  dueDate     DateTime
+  doneAt      DateTime?
+  sortOrder   Int
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  checklist Checklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+  owner     Employee  @relation("ChecklistItemOwner", fields: [ownerId], references: [id])
+}
+
+// ---------------------------------------------------------------- Performance
+
+model Goal {
+  id          String   @id @default(cuid())
+  employeeId  String
+  year        Int
+  quarter     Int      // 1-4
+  title       String
+  description String?
+  status      String   // not_started | on_track | at_risk | done | dropped
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+}
+
+model OneOnOne {
+  id         String   @id @default(cuid())
+  employeeId String
+  managerId  String
+  date       DateTime
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  employee    Employee     @relation("OneOnOneEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  manager     Employee     @relation("OneOnOneManager", fields: [managerId], references: [id])
+  actionItems ActionItem[]
+}
+
+model ActionItem {
+  id         String    @id @default(cuid())
+  oneOnOneId String
+  title      String
+  ownerId    String
+  dueDate    DateTime?
+  doneAt     DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  oneOnOne OneOnOne @relation(fields: [oneOnOneId], references: [id], onDelete: Cascade)
+  owner    Employee @relation("ActionItemOwner", fields: [ownerId], references: [id])
+}
+
+model ReviewCycle {
+  id             String   @id @default(cuid())
+  name           String
+  year           Int
+  half           String   // H1 | H2
+  selfDueDate    DateTime
+  managerDueDate DateTime
+  status         String   // open | closed
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  reviews Review[]
+
+  @@unique([year, half])
+}
+
+model Review {
+  id          String    @id @default(cuid())
+  cycleId     String
+  employeeId  String    // the person being reviewed
+  reviewerId  String    // the person writing it
+  kind        String    // self | manager | peer
+  status      String    // draft | submitted
+  summary     String?
+  submittedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  cycle    ReviewCycle    @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  employee Employee       @relation("ReviewSubject", fields: [employeeId], references: [id], onDelete: Cascade)
+  reviewer Employee       @relation("ReviewAuthor", fields: [reviewerId], references: [id])
+  ratings  ReviewRating[]
+
+  @@unique([cycleId, employeeId, reviewerId, kind])
+}
+
+model ReviewRating {
+  id        String   @id @default(cuid())
+  reviewId  String
+  criterion String
+  rating    Int      // 1-5
+  comment   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  review Review @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@unique([reviewId, criterion])
+}
+
+// ---------------------------------------------------------------- Compensation
+
+model SalaryRecord {
+  id            String   @id @default(cuid())
+  employeeId    String
+  amount        Float    // monthly gross
+  currency      String
+  effectiveDate DateTime
+  reason        String?  // hire | annual_review | promotion | adjustment
+  createdById   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  employee  Employee  @relation("SalaryEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  createdBy Employee? @relation("SalaryCreatedBy", fields: [createdById], references: [id])
+}
+
+model Benefit {
+  id          String    @id @default(cuid())
+  employeeId  String
+  type        String    // medical_insurance | transport_allowance | internet_allowance | equipment | other
+  description String?
+  amount      Float?    // monthly value, if any
+  currency    String?
+  startDate   DateTime
+  endDate     DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+}
+
+model SalaryAdvance {
+  id         String   @id @default(cuid())
+  employeeId String
+  amount     Float
+  currency   String
+  date       DateTime
+  note       String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+}
